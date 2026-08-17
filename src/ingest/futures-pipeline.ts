@@ -3,6 +3,7 @@ import type {
   FuturesCandle,
   FuturesKlineInterval,
   MarketContext,
+  OiAccumulation,
   OpenInterestSnapshot,
   TakerFlowSnapshot,
 } from "../domain/futures";
@@ -114,6 +115,57 @@ function selectPreviousOpenInterest(
     .at(-1);
 }
 
+/**
+ * 长窗口 OI 积累趋势：以历史快照中最早的一条为基线，计算到当前快照的累计变化率。
+ * 单根 K 线的 oiValueDelta 只反映一个周期（5m/15m），资金提前数小时布局（GPS 回测
+ * 中 OI 翻倍后放量启动）时无法体现；这里用整段历史窗口捕捉。
+ */
+function computeOiAccumulation(
+  snapshots: readonly OpenInterestSnapshot[],
+  currentSnapshot: OpenInterestSnapshot | undefined,
+  interval: FuturesKlineInterval,
+): OiAccumulation | undefined {
+  if (!currentSnapshot) {
+    return undefined;
+  }
+
+  const sorted = [...snapshots]
+    .sort((left, right) => left.timestamp - right.timestamp)
+    .filter((snapshot) => snapshot.timestamp <= currentSnapshot.timestamp);
+
+  // 至少需要 7 个样本（当前 + 6 条历史）才有统计意义：5m 窗口约 30 分钟，15m 约 90 分钟。
+  if (sorted.length < 7) {
+    return undefined;
+  }
+
+  const baseline = sorted[0];
+  const currentValue = Number.parseFloat(currentSnapshot.sumOpenInterestValue);
+  const baselineValue = Number.parseFloat(baseline.sumOpenInterestValue);
+  const currentUnits = Number.parseFloat(currentSnapshot.sumOpenInterest);
+  const baselineUnits = Number.parseFloat(baseline.sumOpenInterest);
+
+  let delta: number | undefined;
+  if (baselineValue > 0 && currentValue > 0) {
+    delta = currentValue / baselineValue - 1;
+  } else if (baselineUnits > 0 && currentUnits > 0) {
+    delta = currentUnits / baselineUnits - 1;
+  }
+  if (delta === undefined || !Number.isFinite(delta)) {
+    return undefined;
+  }
+
+  const spanMinutes = Math.round((currentSnapshot.timestamp - baseline.timestamp) / 60_000);
+  const hours = Math.floor(spanMinutes / 60);
+  const minutes = spanMinutes % 60;
+  const windowLabel = hours > 0 ? (minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`) : `${minutes}m`;
+
+  return {
+    windowLabel: `${windowLabel} (${interval}×${sorted.length})`,
+    delta,
+    samples: sorted.length,
+  };
+}
+
 function selectMatchingTakerFlow(
   snapshots: readonly TakerFlowSnapshot[],
   candle: FuturesCandle,
@@ -161,6 +213,7 @@ export class OiPoller {
     let openInterest: OpenInterestSnapshot | undefined;
     let previousOpenInterest: OpenInterestSnapshot | undefined;
     let takerFlow: TakerFlowSnapshot | undefined;
+    let oiAccumulation: OiAccumulation | undefined;
 
     for (let attempt = 0; attempt <= OI_RETRY_DELAYS_MS.length; attempt += 1) {
       const [openInterestHistory, takerFlowHistory, fundingRateHistory] = await Promise.all([
@@ -173,7 +226,7 @@ export class OiPoller {
       previousOpenInterest = selectPreviousOpenInterest(openInterestHistory, openInterest);
       takerFlow = selectMatchingTakerFlow(takerFlowHistory, candle);
       fundingRate = fundingRate ?? selectFundingRate(fundingRateHistory, candle);
-
+      oiAccumulation = computeOiAccumulation(openInterestHistory, openInterest, interval);
       if (openInterest && previousOpenInterest && takerFlow) {
         break;
       }
@@ -204,6 +257,7 @@ export class OiPoller {
       candleCloseTime: candle.closeTime,
       openInterest,
       previousOpenInterest,
+      oiAccumulation,
       takerFlow,
       fundingRate,
       sourceTimestamp: candle.sourceTimestamp ?? candle.closeTime,

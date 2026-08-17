@@ -7,17 +7,20 @@ import type {
 import type { ShortFuelFactor } from "./short-fuel";
 
 export type FuturesOiFactorThresholds = Readonly<
-  Record<FuturesKlineInterval, { oi: number; volume: number; price5m: number }>
+  Record<FuturesKlineInterval, { oi: number; volume: number; price5m: number; oiAccumulation: number }>
 >;
 
 export const DEFAULT_FUTURES_OI_FACTOR_THRESHOLDS: FuturesOiFactorThresholds = {
-  "5m": { oi: 0.05, volume: 2, price5m: 0.03 },
-  "15m": { oi: 0.08, volume: 1.5, price5m: 0.03 },
+  "5m": { oi: 0.05, volume: 2, price5m: 0.03, oiAccumulation: 0.3 },
+  "15m": { oi: 0.08, volume: 1.5, price5m: 0.03, oiAccumulation: 0.3 },
 } as const;
 
 type OiFactorInput = {
   interval: FuturesKlineInterval;
   oiValueDelta: number;
+  /** 长窗口 OI 累计变化率（如过去 30-90 分钟，GPS 回测启发：资金提前布局） */
+  oiAccumulationDelta?: number;
+  oiAccumulationWindowLabel?: string;
   volumeRatio: number;
   priceReturn: number;
   priceReturn5m: number;
@@ -94,6 +97,28 @@ export function buildFuturesOiAnomalyFactors(
       detail: `绝对 OI 变化 ${formatPercent(Math.abs(input.oiValueDelta))} ≥ ${formatPercent(thresholds.oi)}`,
       value: input.oiValueDelta,
     });
+  }
+
+  // 长窗口 OI 积累：资金提前数小时布局的信号（GPS 回测：OI 翻倍后放量启动）。
+  if (input.oiAccumulationDelta !== undefined) {
+    const window = input.oiAccumulationWindowLabel ?? "长窗口";
+    if (input.oiAccumulationDelta >= thresholds.oiAccumulation) {
+      factors.push({
+        code: "OI_ACCUMULATION",
+        label: "OI 持续积累",
+        severity: "HIGH",
+        detail: `${window} OI 累计 ${formatPercent(input.oiAccumulationDelta)} ≥ ${formatPercent(thresholds.oiAccumulation)}，资金提前布局`,
+        value: input.oiAccumulationDelta,
+      });
+    } else if (input.oiAccumulationDelta > 0) {
+      factors.push({
+        code: "OI_ACCUMULATION",
+        label: "OI 温和积累",
+        severity: "INFO",
+        detail: `${window} OI 累计 ${formatPercent(input.oiAccumulationDelta)}`,
+        value: input.oiAccumulationDelta,
+      });
+    }
   }
 
   if (input.volumeRatio >= thresholds.volume) {
@@ -179,6 +204,11 @@ export function calculateFuturesOiAnomalyScore(
     input.oiValueDelta > 0
       ? Math.min(50, (input.oiValueDelta / thresholds.oi) * 50)
       : 0;
+  // 长窗口 OI 积累加分（上限 20）：50% 累计增长拿满，与单周期 oiScore 互补。
+  const oiAccumulationScore =
+    input.oiAccumulationDelta !== undefined && input.oiAccumulationDelta > 0
+      ? Math.min(20, (input.oiAccumulationDelta / 0.5) * 20)
+      : 0;
   const volumeScore = Math.min(15, (input.volumeRatio / thresholds.volume) * 15);
   const price5mScore =
     input.interval === "5m" && input.priceReturn5m > 0
@@ -193,6 +223,6 @@ export function calculateFuturesOiAnomalyScore(
   // 跨交易所空头燃料：上方空单堆积/空头付费时加分（上限 15，总分仍封顶 100）。
   const shortFuelScore = input.shortFuel?.dataAvailable ? Math.min(15, input.shortFuel.score) : 0;
   return Math.round(
-    Math.min(100, oiScore + volumeScore + price5mScore + alignmentScore + takerScore + shortFuelScore),
+    Math.min(100, oiScore + oiAccumulationScore + volumeScore + price5mScore + alignmentScore + takerScore + shortFuelScore),
   );
 }

@@ -91,6 +91,16 @@ export interface OpenInterestSnapshot {
   timestamp: number;
 }
 
+/** 长窗口 OI 积累趋势：利用 OI 历史快照计算的累计变化（GPS 回测发现：OI 数小时翻倍后再放量启动，单根 K 线 OI delta 捕捉不到） */
+export interface OiAccumulation {
+  /** 窗口描述，如 "45m"（5m×9）或 "2h15m"（15m×9） */
+  windowLabel: string;
+  /** 累计变化率（小数，0.3 = +30%），基于 sumOpenInterestValue；不可用时回退单位口径 */
+  delta: number;
+  /** 参与计算的快照数量 */
+  samples: number;
+}
+
 export interface TakerFlowSnapshot {
   symbol: string;
   buySellRatio: string;
@@ -126,6 +136,8 @@ export interface MarketContext {
   candleCloseTime: number;
   openInterest?: OpenInterestSnapshot;
   previousOpenInterest?: OpenInterestSnapshot;
+  /** 长窗口 OI 累计变化（数根 K 线前的 OI 基线 vs 当前），捕捉资金提前布局 */
+  oiAccumulation?: OiAccumulation;
   takerFlow?: TakerFlowSnapshot;
   fundingRate?: FundingRateSnapshot;
   isContractOnly?: boolean;
@@ -167,6 +179,10 @@ export interface FuturesMetrics {
   volumePercentile: number;
   oiValueDelta: number;
   oiUnitDelta: number;
+  /** 长窗口 OI 累计变化率（如过去 45m/2h15m），GPS 回测启发：资金提前布局的信号 */
+  oiAccumulationDelta?: number;
+  oiAccumulationWindowLabel?: string;
+  oiAccumulationSamples?: number;
   priceReturn: number;
   takerImbalance: number;
   liquidationRatio: number;
@@ -230,6 +246,7 @@ export interface FuturesThresholds {
 export type FuturesOiAnomalyFactorCode =
   | "OI_DIRECTION"
   | "OI_THRESHOLD_BREAK"
+  | "OI_ACCUMULATION"
   | "VOLUME_EXPANSION"
   | "PRICE_5M_EXPANSION"
   | "PRICE_OI_ALIGNMENT"

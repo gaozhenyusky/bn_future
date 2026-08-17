@@ -58,6 +58,9 @@ type StoredFlowMetric = {
   volumePercentile?: number;
   oiValueDelta?: number;
   oiUnitDelta?: number;
+  oiAccumulationDelta?: number;
+  oiAccumulationWindowLabel?: string;
+  oiAccumulationSamples?: number;
   priceReturn?: number;
   takerImbalance?: number;
   liquidationRatio?: number;
@@ -231,6 +234,9 @@ export class InMemoryFuturesRepository implements FuturesRepository {
       volumePercentile: metrics.volumePercentile,
       oiValueDelta: metrics.oiValueDelta,
       oiUnitDelta: metrics.oiUnitDelta,
+      oiAccumulationDelta: metrics.oiAccumulationDelta,
+      oiAccumulationWindowLabel: metrics.oiAccumulationWindowLabel,
+      oiAccumulationSamples: metrics.oiAccumulationSamples,
       priceReturn: metrics.priceReturn,
       takerImbalance: metrics.takerImbalance,
       liquidationRatio: metrics.liquidationRatio,
@@ -414,6 +420,8 @@ export class InMemoryFuturesRepository implements FuturesRepository {
         const factorInput = {
           interval: metric.interval,
           oiValueDelta,
+          oiAccumulationDelta: metric.oiAccumulationDelta,
+          oiAccumulationWindowLabel: metric.oiAccumulationWindowLabel,
           volumeRatio,
           priceReturn,
           priceReturn5m,

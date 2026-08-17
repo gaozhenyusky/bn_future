@@ -209,6 +209,9 @@ interface OiMetricRow extends QueryResultRow {
   volume_ratio: number | null;
   oi_value_delta: number | null;
   oi_unit_delta: number | null;
+  oi_accumulation_delta: number | null;
+  oi_accumulation_window_label: string | null;
+  oi_accumulation_samples: number | null;
   taker_imbalance: number | null;
   price_oi_alignment: FuturesPriceOiAlignment | null;
   short_fuel_score: number | null;
@@ -446,6 +449,8 @@ function mapOiLeaderboardRow(
   const volumeRatio = row.volume_ratio ?? 0;
   const oiValueDelta = row.oi_value_delta ?? 0;
   const oiUnitDelta = row.oi_unit_delta ?? oiValueDelta;
+  const oiAccumulationDelta = row.oi_accumulation_delta ?? undefined;
+  const oiAccumulationWindowLabel = row.oi_accumulation_window_label ?? undefined;
   const takerImbalance = row.taker_imbalance ?? 0;
   const priceOiAlignment = deriveFuturesOiValueAlignment(priceReturn, oiValueDelta);
   const shortFuelScore = row.short_fuel_score ?? 0;
@@ -453,6 +458,8 @@ function mapOiLeaderboardRow(
   const factorInput = {
     interval: row.interval,
     oiValueDelta,
+    oiAccumulationDelta,
+    oiAccumulationWindowLabel,
     volumeRatio,
     priceReturn,
     priceReturn5m,
@@ -903,6 +910,9 @@ export class PostgresFuturesRepository implements FuturesRepository {
           volume_percentile,
           oi_value_delta,
           oi_unit_delta,
+          oi_accumulation_delta,
+          oi_accumulation_window_label,
+          oi_accumulation_samples,
           price_return,
           taker_imbalance,
           liquidation_ratio,
@@ -918,13 +928,16 @@ export class PostgresFuturesRepository implements FuturesRepository {
           ambush_score,
           seven_day_range
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
         ON CONFLICT (symbol, interval, candle_open_time) DO UPDATE
         SET candle_close_time = EXCLUDED.candle_close_time,
             volume_ratio = EXCLUDED.volume_ratio,
             volume_percentile = EXCLUDED.volume_percentile,
             oi_value_delta = EXCLUDED.oi_value_delta,
             oi_unit_delta = EXCLUDED.oi_unit_delta,
+            oi_accumulation_delta = EXCLUDED.oi_accumulation_delta,
+            oi_accumulation_window_label = EXCLUDED.oi_accumulation_window_label,
+            oi_accumulation_samples = EXCLUDED.oi_accumulation_samples,
             price_return = EXCLUDED.price_return,
             taker_imbalance = EXCLUDED.taker_imbalance,
             liquidation_ratio = EXCLUDED.liquidation_ratio,
@@ -949,6 +962,9 @@ export class PostgresFuturesRepository implements FuturesRepository {
         metrics.volumePercentile,
         metrics.oiValueDelta,
         metrics.oiUnitDelta,
+        metrics.oiAccumulationDelta ?? null,
+        metrics.oiAccumulationWindowLabel ?? null,
+        metrics.oiAccumulationSamples ?? null,
         metrics.priceReturn,
         metrics.takerImbalance,
         metrics.liquidationRatio,
@@ -1346,6 +1362,9 @@ export class PostgresFuturesRepository implements FuturesRepository {
           m.volume_ratio,
           m.oi_value_delta,
           m.oi_unit_delta,
+          m.oi_accumulation_delta,
+          m.oi_accumulation_window_label,
+          m.oi_accumulation_samples,
           m.taker_imbalance,
           m.price_oi_alignment,
           m.short_fuel_score,

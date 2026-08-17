@@ -148,6 +148,7 @@ describe("loadConfig", () => {
 
     expect(packageJson.dependencies?.tsx).toBeDefined();
     expect(packageJson.devDependencies?.tsx).toBeUndefined();
-    expect(packageJson.scripts?.start).toBe("node --import tsx/esm dist/src/main.js");
+    // tsx 不自动加载 .env，启动脚本必须显式 --env-file（本地与服务器一致）
+    expect(packageJson.scripts?.start).toBe("node --env-file=.env --import tsx/esm dist/src/main.js");
   });
 });

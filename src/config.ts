@@ -61,6 +61,8 @@ const configSchema = z
     FUTURES_CLEANUP_INTERVAL_MS: positiveInt(21_600_000, "FUTURES_CLEANUP_INTERVAL_MS"),
     FUTURES_CLEANUP_BATCH_SIZE: positiveInt(5_000, "FUTURES_CLEANUP_BATCH_SIZE"),
     FUTURES_PRICE_RETURN_5M_THRESHOLD: positiveNumber(0.03, "FUTURES_PRICE_RETURN_5M_THRESHOLD"),
+    // OI 积累趋势阈值（长窗口累计 OI 变化率，0.3 = 30%），捕捉资金提前布局
+    FUTURES_OI_ACCUMULATION_THRESHOLD: positiveNumber(0.3, "FUTURES_OI_ACCUMULATION_THRESHOLD"),
     BINANCE_EXECUTION_MODE: z.enum(["SIMULATION", "BINANCE_DEMO_TESTNET", "BINANCE_PRODUCTION"]).default("SIMULATION"),
     BINANCE_DEMO_API_KEY: z.string().min(1).optional(),
     BINANCE_DEMO_API_SECRET: z.string().min(1).optional(),
@@ -130,6 +132,8 @@ export type AppConfig = {
   futuresCleanupIntervalMs: number;
   futuresCleanupBatchSize: number;
   futuresPriceReturn5mThreshold: number;
+  /** 长窗口 OI 累计变化率阈值（小数，默认 0.3 = 30%） */
+  futuresOiAccumulationThreshold: number;
   executionMode: "SIMULATION" | "BINANCE_DEMO_TESTNET" | "BINANCE_PRODUCTION";
   binanceDemoApiKey?: string;
   binanceDemoApiSecret?: string;
@@ -187,6 +191,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     futuresCleanupIntervalMs: value.FUTURES_CLEANUP_INTERVAL_MS,
     futuresCleanupBatchSize: value.FUTURES_CLEANUP_BATCH_SIZE,
     futuresPriceReturn5mThreshold: value.FUTURES_PRICE_RETURN_5M_THRESHOLD,
+    futuresOiAccumulationThreshold: value.FUTURES_OI_ACCUMULATION_THRESHOLD,
     executionMode: value.BINANCE_EXECUTION_MODE,
     binanceDemoApiKey: value.BINANCE_DEMO_API_KEY,
     binanceDemoApiSecret: value.BINANCE_DEMO_API_SECRET,

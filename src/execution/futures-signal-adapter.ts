@@ -14,7 +14,7 @@ type SignalThresholdConfig =
   | FuturesOiFactorThresholds
   | (Pick<
       AppConfig,
-      "futuresVolumeRatio5m" | "futuresOiDelta5m" | "futuresVolumeRatio15m" | "futuresOiDelta15m"
+      "futuresVolumeRatio5m" | "futuresOiDelta5m" | "futuresVolumeRatio15m" | "futuresOiDelta15m" | "futuresOiAccumulationThreshold"
     > &
       Partial<Pick<AppConfig, "futuresPriceReturn5mThreshold">>);
 
@@ -22,8 +22,8 @@ function normalizeThresholds(config: SignalThresholdConfig): FuturesOiFactorThre
   if ("5m" in config) return config;
 
   return {
-    "5m": { oi: config.futuresOiDelta5m, volume: config.futuresVolumeRatio5m, price5m: config.futuresPriceReturn5mThreshold ?? 0.03 },
-    "15m": { oi: config.futuresOiDelta15m, volume: config.futuresVolumeRatio15m, price5m: config.futuresPriceReturn5mThreshold ?? 0.03 },
+    "5m": { oi: config.futuresOiDelta5m, volume: config.futuresVolumeRatio5m, price5m: config.futuresPriceReturn5mThreshold ?? 0.03, oiAccumulation: config.futuresOiAccumulationThreshold ?? 0.3 },
+    "15m": { oi: config.futuresOiDelta15m, volume: config.futuresVolumeRatio15m, price5m: config.futuresPriceReturn5mThreshold ?? 0.03, oiAccumulation: config.futuresOiAccumulationThreshold ?? 0.3 },
   };
 }
 

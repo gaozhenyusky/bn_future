@@ -350,8 +350,8 @@ export function createRuntime(env: NodeJS.ProcessEnv = process.env): Runtime {
     await pool.end();
   });
   const oiFactorThresholds = {
-    "5m": { oi: config.futuresOiDelta5m, volume: config.futuresVolumeRatio5m, price5m: config.futuresPriceReturn5mThreshold },
-    "15m": { oi: config.futuresOiDelta15m, volume: config.futuresVolumeRatio15m, price5m: config.futuresPriceReturn5mThreshold },
+    "5m": { oi: config.futuresOiDelta5m, volume: config.futuresVolumeRatio5m, price5m: config.futuresPriceReturn5mThreshold, oiAccumulation: config.futuresOiAccumulationThreshold },
+    "15m": { oi: config.futuresOiDelta15m, volume: config.futuresVolumeRatio15m, price5m: config.futuresPriceReturn5mThreshold, oiAccumulation: config.futuresOiAccumulationThreshold },
   } as const;
   const repository = Object.assign(createMysqlFuturesRepository(pool, oiFactorThresholds), {
     async close() {

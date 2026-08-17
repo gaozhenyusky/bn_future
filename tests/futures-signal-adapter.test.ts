@@ -30,7 +30,7 @@ const metrics: FuturesMetrics = {
 describe("toExecutionSignal", () => {
   it("converts only complete contract-only long buildup signals with independent thresholds", () => {
     const result = toExecutionSignal(signal, metrics, candle, {
-      futuresVolumeRatio5m: 2, futuresOiDelta5m: 0.05, futuresVolumeRatio15m: 1.5, futuresOiDelta15m: 0.08,
+      futuresVolumeRatio5m: 2, futuresOiDelta5m: 0.05, futuresVolumeRatio15m: 1.5, futuresOiDelta15m: 0.08, futuresOiAccumulationThreshold: 0.3,
     }, 12);
 
     expect(result).toMatchObject({
@@ -46,7 +46,7 @@ describe("toExecutionSignal", () => {
   ];
   it.each(invalidCases)("rejects %s", (_label, overrides) => {
     expect(toExecutionSignal({ ...signal, ...overrides.signal }, { ...metrics, ...overrides.metrics } as FuturesMetrics, candle, {
-      futuresVolumeRatio5m: 2, futuresOiDelta5m: 0.05, futuresVolumeRatio15m: 1.5, futuresOiDelta15m: 0.08,
+      futuresVolumeRatio5m: 2, futuresOiDelta5m: 0.05, futuresVolumeRatio15m: 1.5, futuresOiDelta15m: 0.08, futuresOiAccumulationThreshold: 0.3,
     }, 0)).toBeNull();
   });
 });

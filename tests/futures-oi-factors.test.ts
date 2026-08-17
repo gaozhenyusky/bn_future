@@ -116,4 +116,64 @@ describe("5m breakout score factor", () => {
       ]),
     );
   });
+
+  describe("OI accumulation (long-window capital pre-positioning)", () => {
+    it("adds a HIGH OI_ACCUMULATION factor when long-window OI grows beyond threshold", () => {
+      // GPS 回测场景：单根 K 线 OI 变化很小（不触发 OI_THRESHOLD_BREAK），但长窗口累计 +40%。
+      const factors = buildFuturesOiAnomalyFactors({
+        ...baseInput,
+        oiValueDelta: 0.02,
+        oiAccumulationDelta: 0.4,
+        oiAccumulationWindowLabel: "45m (5m×9)",
+      });
+
+      expect(factors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "OI_ACCUMULATION", severity: "HIGH" }),
+        ]),
+      );
+    });
+
+    it("reports mild accumulation as INFO and missing data as no factor", () => {
+      const mildFactors = buildFuturesOiAnomalyFactors({
+        ...baseInput,
+        oiValueDelta: 0.01,
+        oiAccumulationDelta: 0.05,
+        oiAccumulationWindowLabel: "45m (5m×9)",
+      });
+      expect(mildFactors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "OI_ACCUMULATION", severity: "INFO" }),
+        ]),
+      );
+
+      const noDataFactors = buildFuturesOiAnomalyFactors(baseInput);
+      expect(noDataFactors).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "OI_ACCUMULATION" }),
+        ]),
+      );
+    });
+
+    it("boosts the score when OI accumulates over the long window", () => {
+      // 无积累：OI 0.05（50 分）+ 量 2（15）+ 5m 0.03（15）+ 结构 10 + 主动盘 10 = 100 已封顶，
+      // 用低 OI/低量输入对比，确保积累分独立生效。
+      const base = {
+        ...baseInput,
+        oiValueDelta: 0.05,
+        volumeRatio: 1,
+        priceReturn5m: 0.01,
+        takerImbalance: 0,
+      };
+      const withoutAccumulation = calculateFuturesOiAnomalyScore(base);
+      const withAccumulation = calculateFuturesOiAnomalyScore({
+        ...base,
+        oiAccumulationDelta: 0.5,
+        oiAccumulationWindowLabel: "45m (5m×9)",
+      });
+
+      expect(withAccumulation).toBeGreaterThan(withoutAccumulation);
+      expect(withAccumulation).toBeLessThanOrEqual(100);
+    });
+  });
 });
