@@ -611,11 +611,11 @@ function pnlTone(value: number | undefined): string {
   return value > 0 ? "positive" : "negative";
 }
 
-function RecordDetailPanel({ record, events, onClose }: { record: ExecutionRecord; events: ExecutionEvent[]; onClose: () => void }) {
+function RecordDetailPanel({ record, events, liveTrading, onClose }: { record: ExecutionRecord; events: ExecutionEvent[]; liveTrading: boolean; onClose: () => void }) {
   const pnl = record.pnl;
   return <aside className="detail-panel panel" aria-label={`${record.symbol} 交易明细`}>
     <div className="detail-heading">
-      <div><span className="eyebrow">模拟交易明细</span><h2>{displaySymbol(record.symbol)}USDT 永续</h2><p>{record.status === "OPEN" ? "持仓中" : "已平仓"} · {record.leverage}x 杠杆 · 只读模拟</p></div>
+      <div><span className="eyebrow">交易明细</span><h2>{displaySymbol(record.symbol)}USDT 永续</h2><p>{record.status === "OPEN" ? "持仓中" : "已平仓"} · {record.leverage}x 杠杆 · {liveTrading ? "实盘执行" : "只读模拟"}</p></div>
       <button type="button" className="icon-button" aria-label="关闭明细" onClick={onClose}><Icon name="close" /></button>
     </div>
     <div className="detail-meta"><span>开仓 {timeText(record.openedAt)}</span><span>{record.closedAt ? `平仓 ${timeText(record.closedAt)}` : "等待平仓"}</span></div>
@@ -646,7 +646,7 @@ function RecordDetailPanel({ record, events, onClose }: { record: ExecutionRecor
   </aside>;
 }
 
-function RecordsPanel({ selected, onSelect, onClose }: { selected: ExecutionRecord | null; onSelect: (record: ExecutionRecord) => void; onClose: () => void }) {
+function RecordsPanel({ selected, onSelect, liveTrading, onClose }: { selected: ExecutionRecord | null; onSelect: (record: ExecutionRecord) => void; liveTrading: boolean; onClose: () => void }) {
   const [rows, setRows] = useState<ExecutionRecord[]>([]);
   const [events, setEvents] = useState<ExecutionEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -700,15 +700,15 @@ function RecordsPanel({ selected, onSelect, onClose }: { selected: ExecutionReco
 
   return <>
     <main className="main-content">
-      <section className="page-heading"><div><span className="eyebrow">模拟执行 · 只读</span><h1>模拟交易记录</h1><p>自动开仓、分级止盈与平仓的每一笔明细；模拟盘不调用任何真实下单接口。</p></div><div className="freshness"><span>{refreshing ? "刷新中" : "实时更新"}</span><small>{loadedAt ? `更新于 ${timeText(loadedAt)}` : "等待数据"}</small></div></section>
+      <section className="page-heading"><div><span className="eyebrow">{liveTrading ? "实盘执行" : "模拟执行 · 只读"}</span><h1>{liveTrading ? "实盘交易记录" : "模拟交易记录"}</h1><p>自动开仓、分级止盈与平仓的每一笔明细。</p></div><div className="freshness"><span>{refreshing ? "刷新中" : "实时更新"}</span><small>{loadedAt ? `更新于 ${timeText(loadedAt)}` : "等待数据"}</small></div></section>
 
       {error && <div className="error-banner"><span>{error}</span><button type="button" className="text-button" onClick={() => void loadData(true)}>重试</button></div>}
 
       <section className="toolbar panel"><button type="button" className="refresh-button" onClick={() => void loadData(true)} disabled={refreshing}><Icon name="refresh" />{refreshing ? "刷新中" : "刷新"}</button><span className="toolbar-note">{rows.length} 笔交易记录</span></section>
 
-      <section className="table-panel panel"><div className="table-heading"><div><h2>开平仓记录</h2><p>点击任意记录查看完整操作时间线与盈亏明细；仅模拟盘数据。</p></div><span className="table-legend"><i className="legend-dot good" />持仓中 <i className="legend-dot" />已平仓</span></div><div className="table-scroll"><table><thead><tr><th>标的</th><th>状态</th><th>开仓价</th><th>数量</th><th>杠杆</th><th>名义金额</th><th>止盈级数</th><th>净盈亏</th><th>开仓时间</th><th>平仓时间</th><th /></tr></thead><tbody>{rows.length === 0 ? <tr><td colSpan={11}><EmptyState message={error ? "后端未连接，暂无交易记录" : "还没有模拟交易，等待合格信号自动开仓"} /></td></tr> : rows.map((row) => <tr key={row.symbol} className={selected?.symbol === row.symbol ? "is-row-selected" : ""} onClick={() => onSelect(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(row); }}><td><div className="symbol-cell"><span className="asset-symbol">{displaySymbol(row.symbol).slice(0, 4)}</span><div><strong>{displaySymbol(row.symbol)}USDT</strong><small>永续 · 开仓 {row.openCount} 次 · 平仓 {row.closeCount} 次</small></div></div></td><td><span className={`quality quality-${row.status === "OPEN" ? "good" : ""}`}>{row.status === "OPEN" ? "持仓中" : "已平仓"}</span></td><td className="mono">{row.entryPrice}</td><td className="mono">{row.initialQuantity} 枚</td><td className="mono">{row.leverage}x</td><td className="mono">{row.notionalUsdt} USDT</td><td className="mono">{row.takeProfitLevelReached}</td><td className={`mono ${pnlTone(row.pnl?.netPnl)}`}><strong>{formatUsdt(row.pnl?.netPnl)}</strong></td><td className="muted mono">{timeText(row.openedAt)}</td><td className="muted mono">{row.closedAt ? timeText(row.closedAt) : "—"}</td><td className="row-arrow"><Icon name="chevron" /></td></tr>)}</tbody></table></div></section>
+      <section className="table-panel panel"><div className="table-heading"><div><h2>开平仓记录</h2><p>点击任意记录查看完整操作时间线与盈亏明细。</p></div><span className="table-legend"><i className="legend-dot good" />持仓中 <i className="legend-dot" />已平仓</span></div><div className="table-scroll"><table><thead><tr><th>标的</th><th>状态</th><th>开仓价</th><th>数量</th><th>杠杆</th><th>名义金额</th><th>止盈级数</th><th>净盈亏</th><th>开仓时间</th><th>平仓时间</th><th /></tr></thead><tbody>{rows.length === 0 ? <tr><td colSpan={11}><EmptyState message={error ? "后端未连接，暂无交易记录" : "还没有交易记录，等待合格信号自动开仓"} /></td></tr> : rows.map((row) => <tr key={row.symbol} className={selected?.symbol === row.symbol ? "is-row-selected" : ""} onClick={() => onSelect(row)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(row); }}><td><div className="symbol-cell"><span className="asset-symbol">{displaySymbol(row.symbol).slice(0, 4)}</span><div><strong>{displaySymbol(row.symbol)}USDT</strong><small>永续 · 开仓 {row.openCount} 次 · 平仓 {row.closeCount} 次</small></div></div></td><td><span className={`quality quality-${row.status === "OPEN" ? "good" : ""}`}>{row.status === "OPEN" ? "持仓中" : "已平仓"}</span></td><td className="mono">{row.entryPrice}</td><td className="mono">{row.initialQuantity} 枚</td><td className="mono">{row.leverage}x</td><td className="mono">{row.notionalUsdt} USDT</td><td className="mono">{row.takeProfitLevelReached}</td><td className={`mono ${pnlTone(row.pnl?.netPnl)}`}><strong>{formatUsdt(row.pnl?.netPnl)}</strong></td><td className="muted mono">{timeText(row.openedAt)}</td><td className="muted mono">{row.closedAt ? timeText(row.closedAt) : "—"}</td><td className="row-arrow"><Icon name="chevron" /></td></tr>)}</tbody></table></div></section>
     </main>
-    {selected && <div className="detail-side"><RecordDetailPanel record={selected} events={events} onClose={onClose} /></div>}
+    {selected && <div className="detail-side"><RecordDetailPanel record={selected} events={events} liveTrading={liveTrading} onClose={onClose} /></div>}
   </>;
 }
 
@@ -796,7 +796,7 @@ export default function App() {
         <button type="button" className={`rail-item ${section === "settings" ? "is-active" : ""}`} onClick={() => setSection("settings")}><Icon name="gear" /><span>设置</span></button>
       </nav><div className="rail-bottom"><div className="rail-divider" /><span className="rail-caption">数据源</span><div className="source-mini"><StatusDot status={online ? "connected" : "disconnected"} />币安合约</div><div className="source-mini"><StatusDot status={processOnline ? "connected" : "disconnected"} />指标处理</div><div className="source-mini"><StatusDot status="degraded" />Bitget 参考</div></div></aside>
 
-      {section === "settings" ? <SettingsPanel /> : section === "records" ? <RecordsPanel selected={selectedRecord} onSelect={setSelectedRecord} onClose={() => setSelectedRecord(null)} /> : section === "onchain" ? <main className="main-content placeholder-main"><div className="placeholder-card panel"><span className="eyebrow">模块预留</span><h1>链上监控</h1><p>链上模块暂未启用，本页先专注 Binance 合约 OI 异动排行榜。</p><button type="button" className="primary-button" onClick={() => setSection("contract")}>返回合约排行榜 <Icon name="chevron" /></button></div></main> : <main className="main-content">
+      {section === "settings" ? <SettingsPanel /> : section === "records" ? <RecordsPanel selected={selectedRecord} onSelect={setSelectedRecord} liveTrading={liveTrading} onClose={() => setSelectedRecord(null)} /> : section === "onchain" ? <main className="main-content placeholder-main"><div className="placeholder-card panel"><span className="eyebrow">模块预留</span><h1>链上监控</h1><p>链上模块暂未启用，本页先专注 Binance 合约 OI 异动排行榜。</p><button type="button" className="primary-button" onClick={() => setSection("contract")}>返回合约排行榜 <Icon name="chevron" /></button></div></main> : <main className="main-content">
         <section className="page-heading"><div><span className="eyebrow">Binance Futures · 只读</span><h1>合约 OI 异动排行榜</h1><p>按综合评分降序排列；每个仅合约标的只取最新闭合窗口，并展示真实触发因子。</p></div><div className="freshness"><StatusDot status={online ? "connected" : "disconnected"} /><span>{refreshing ? "刷新中" : "实时更新"}</span><small>{loadedAt ? `更新于 ${timeText(loadedAt)}` : "等待数据"}</small></div></section>
 
         {error && <div className="error-banner"><span>{error}</span><button type="button" className="text-button" onClick={() => void loadData(true)}>重试</button></div>}
@@ -812,6 +812,6 @@ export default function App() {
 
       {section === "contract" && <div className="detail-side"><DetailPanel row={selected} onClose={() => setSelected(null)} /></div>}
     </div>
-    <footer className="footer"><span>合约雷达 · Binance 合约数据</span><span>自动刷新 15 秒 · 前端无交易控制 · 默认模拟</span></footer>
+    <footer className="footer"><span>合约雷达 · Binance 合约数据</span><span>自动刷新 15 秒 · 前端无交易控制 · {liveTrading ? "实盘执行" : "模拟执行"}</span></footer>
   </div>;
 }
