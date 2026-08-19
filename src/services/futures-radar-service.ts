@@ -581,7 +581,12 @@ export class FuturesRadarService {
         interval,
         price: Number(normalizedCandle.close),
         detectedAt: normalizedCandle.closeTime,
-        has5mReversal: interval === "5m" && metrics.priceOiAlignment !== "PRICE_UP_OI_UP",
+        has5mReversal:
+          // 收紧反转判定：仅"价格下跌 + OI 增仓"（空头增仓压制）算确认反转；
+          // 横盘、微涨、获利了结（上涨 OI 减）不再触发，避免震荡行情开平循环亏手续费。
+          interval === "5m" &&
+          metrics.priceReturn < 0 &&
+          metrics.priceOiAlignment === "PRICE_DOWN_OI_UP",
         dataStreamOk: true,
         // The simulation adapter owns this protection order. A real adapter
         // must replace this callback with an exchange order-state read.

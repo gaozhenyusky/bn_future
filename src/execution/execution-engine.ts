@@ -24,6 +24,13 @@ const PRICE_EPSILON = 1e-9;
 /** 熔断自动复位的最小熔断时长（5 分钟），防止瞬时故障后立即复位 */
 const CIRCUIT_BREAKER_MIN_RESET_AGE_MS = 5 * 60 * 1000;
 
+/**
+ * 反转退出的最小持仓时长（15 分钟）：开仓后短期内 5m 结构必然反复抖动，
+ * 过早反转退出会陷入"开→平→开"循环（每轮亏双边手续费）。给趋势 15 分钟
+ * 空间，仅持续的空头增仓结构才能触发反转退出。
+ */
+const REVERSAL_MIN_HOLD_MS = 15 * 60 * 1000;
+
 function roundQuantity(value: number): number {
   return Number(value.toFixed(6));
 }
@@ -160,9 +167,12 @@ export class ExecutionEngine {
         stopPrice: entryStopPrice,
       });
     } catch {
+      // 保险：保护单挂单失败时先市价平掉刚开的仓位（防止交易所裸仓），再熔断。
+      await this.flattenEntry(signal, filledQuantity);
       return this.tripCircuitForSignal(signal, "PROTECTION_ORDER_MISSING");
     }
     if (protectionOrder.status !== "OPEN" && protectionOrder.status !== "FILLED") {
+      await this.flattenEntry(signal, filledQuantity);
       return this.tripCircuitForSignal(signal, "PROTECTION_ORDER_MISSING");
     }
     await this.deps.positions.markSignalProcessed(signal.dedupeKey);
@@ -249,7 +259,17 @@ export class ExecutionEngine {
       return this.closePosition(position, update, "MAX_HOLD_REACHED");
     }
 
-    if (settings.reversalExitEnabled && update.interval === "5m" && update.has5mReversal) {
+    // 5m 反转退出仅适用于 STANDARD（放量确认）持仓；BREAKOUT（低位埋伏）持仓
+    // 开仓时本就不要求 PRICE_UP_OI_UP（买的是"还没启动"的币），若同样用
+    // 该结构判定反转会把埋伏单在下一个 5m 秒平（每 5 分钟开平循环亏手续费）。
+    // 另加最小持仓时长：刚开仓的 15 分钟内结构抖动不触发反转退出。
+    if (
+      settings.reversalExitEnabled &&
+      update.interval === "5m" &&
+      update.has5mReversal &&
+      position.holdMode !== "BREAKOUT" &&
+      update.detectedAt - position.openedAt >= REVERSAL_MIN_HOLD_MS
+    ) {
       return this.closePosition(position, update, "REVERSAL");
     }
 
@@ -349,6 +369,15 @@ export class ExecutionEngine {
     if (closeOrder.status !== "FILLED") {
       return this.tripCircuit(update, "ORDER_STATUS_UNKNOWN");
     }
+    // 全平后撤销保护单（防止交易所残留止损单）；撤销失败不阻断平仓结果。
+    try {
+      await this.deps.adapter.cancelProtectionOrder({
+        symbol: position.symbol,
+        orderId: position.protectionOrderId,
+      });
+    } catch {
+      // 忽略：保护单撤销失败仅可能残留挂单，不影响已完成的平仓。
+    }
     await this.deps.positions.closePosition(position.symbol);
     await this.deps.audit.record({
       type: "POSITION_CLOSED",
@@ -419,5 +448,37 @@ export class ExecutionEngine {
       at: signal.detectedAt,
     });
     return { status: "CIRCUIT_BREAKER_TRIPPED", reasonCode };
+  }
+
+  /**
+   * 保险平仓：保护单（止损）挂单失败时，尽力市价平掉刚开的仓位，
+   * 防止交易所留下无人管理的裸仓。平仓失败仅记录审计，不阻断熔断。
+   */
+  private async flattenEntry(signal: ExecutionSignal, quantity: number): Promise<void> {
+    try {
+      await this.deps.adapter.placeReduceOnlyOrder({
+        symbol: signal.symbol,
+        clientOrderId: `flat:${signal.signalId}`,
+        quantity,
+        price: signal.entryPrice,
+        reason: "CIRCUIT_BREAKER",
+      });
+      await this.deps.audit.record({
+        type: "POSITION_CLOSED",
+        symbol: signal.symbol,
+        signalId: signal.signalId,
+        reasonCode: "PROTECTION_ORDER_MISSING_FLATTEN",
+        at: signal.detectedAt,
+      });
+    } catch (error) {
+      await this.deps.audit.record({
+        type: "ENTRY_REJECTED",
+        symbol: signal.symbol,
+        signalId: signal.signalId,
+        reasonCode: "FLATTEN_FAILED",
+        at: signal.detectedAt,
+        details: { message: error instanceof Error ? error.message : String(error) },
+      });
+    }
   }
 }

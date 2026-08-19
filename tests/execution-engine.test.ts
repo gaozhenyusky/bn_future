@@ -108,6 +108,12 @@ class FakeAdapter implements ExecutionAdapter {
       stopPrice: input.stopPrice,
     });
   }
+
+  public cancelledProtectionOrders: Array<{ symbol: string; orderId: string }> = [];
+
+  async cancelProtectionOrder(input: { symbol: string; orderId: string }): Promise<void> {
+    this.cancelledProtectionOrders.push(input);
+  }
 }
 
 class MemoryAuditPort implements AuditPort {
@@ -701,6 +707,8 @@ describe("ExecutionEngine", () => {
       createUpdate({
         price: 104,
         has5mReversal: true,
+        // 开仓后约 16.7 分钟，超过反转退出最小持仓 15 分钟
+        detectedAt: 1_720_001_000_000,
       }),
     );
     const position = await positions.getOpenPosition("BTCUSDT");
@@ -714,6 +722,31 @@ describe("ExecutionEngine", () => {
     });
     expect(position).toBeUndefined();
     expect(adapter.entryOrders).toHaveLength(1);
+  });
+
+  it("开仓 15 分钟内 5m 反转不触发反转退出（避免开平循环亏手续费）", async () => {
+    const adapter = new FakeAdapter();
+    const positions = new InMemoryPositionStore();
+    const engine = new ExecutionEngine({
+      mode: "SIMULATION",
+      adapter,
+      riskPolicy: new DemoExecutionRiskPolicy(),
+      positions,
+      audit: new MemoryAuditPort(),
+    });
+
+    await engine.handleSignal(createSignal());
+    const result = await engine.handleMarketUpdate(
+      createUpdate({
+        price: 104,
+        has5mReversal: true,
+        // 开仓后 10 分钟（默认 600 秒），小于 15 分钟最小持仓
+      }),
+    );
+
+    expect(result.status).toBe("NO_ACTION");
+    expect(await positions.getOpenPosition("BTCUSDT")).toBeDefined();
+    expect(adapter.exitOrders).toHaveLength(0);
   });
 
   it.each([
