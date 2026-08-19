@@ -204,7 +204,7 @@ describe("BinanceDemoExecutionAdapter", () => {
 });
 
 describe("BinanceProductionExecutionAdapter", () => {
-  it("places a real STOP_MARKET reduce-only protection order and rejects non-accepted fills", async () => {
+  it("places a real STOP_MARKET reduce-only protection order via Algo Order API and rejects non-accepted fills", async () => {
     const orderRequests: string[] = [];
     const adapter = new BinanceProductionExecutionAdapter({
       apiKey: TEST_API_KEY,
@@ -216,13 +216,15 @@ describe("BinanceProductionExecutionAdapter", () => {
         if (url.includes("/exchangeInfo")) {
           return new Response(JSON.stringify({ symbols: [{ symbol: "HEIUSDT", filters: [{ filterType: "LOT_SIZE", stepSize: "0.001", minQty: "0.001", maxQty: "1000" }] }] }), { status: 200 });
         }
+        // Algo Order API 响应：algoId / algoStatus / clientAlgoId
         return new Response(JSON.stringify({
-          orderId: 777,
-          clientOrderId: "protection:live",
+          algoId: 777,
+          clientAlgoId: "protection:live",
           symbol: "HEIUSDT",
           side: "SELL",
-          origQty: "4.5",
-          status: "NEW",
+          quantity: "4.5",
+          algoStatus: "NEW",
+          triggerPrice: "92",
         }), { status: 200 });
       },
       now: () => 1_700_000_000_000,
@@ -237,11 +239,12 @@ describe("BinanceProductionExecutionAdapter", () => {
 
     expect(protection.status).toBe("OPEN");
     expect(protection.type).toBe("PROTECTION");
-    const orderUrl = orderRequests.find((url) => url.includes("/fapi/v1/order"));
+    const orderUrl = orderRequests.find((url) => url.includes("/fapi/v1/algoOrder"));
     expect(orderUrl).toBeDefined();
+    expect(orderUrl).toContain("algoType=CONDITIONAL");
     expect(orderUrl).toContain("type=STOP_MARKET");
     expect(orderUrl).toContain("reduceOnly=true");
-    expect(orderUrl).toContain("stopPrice=92");
+    expect(orderUrl).toContain("triggerPrice=92");
     expect(orderUrl).toContain("signature=");
 
     // 保护单被拒绝时抛 unknownStatus（引擎熔断、拒绝开仓）
@@ -253,7 +256,7 @@ describe("BinanceProductionExecutionAdapter", () => {
         if (String(input).includes("/exchangeInfo")) {
           return new Response(JSON.stringify({ symbols: [{ symbol: "HEIUSDT", filters: [{ filterType: "LOT_SIZE", stepSize: "0.001" }] }] }), { status: 200 });
         }
-        return new Response(JSON.stringify({ orderId: 778, status: "REJECTED" }), { status: 200 });
+        return new Response(JSON.stringify({ algoId: 778, algoStatus: "REJECTED" }), { status: 200 });
       },
     });
     await expect(rejecting.placeProtectionOrder({
@@ -306,7 +309,11 @@ describe("BinanceProductionExecutionAdapter", () => {
         if (String(input).includes("/exchangeInfo")) {
           return new Response(JSON.stringify({ symbols: [{ symbol: "HEIUSDT", filters: [{ filterType: "LOT_SIZE", stepSize: "0.001" }] }] }), { status: 200 });
         }
-        return new Response(JSON.stringify({ orderId: 999, status: "NEW" }), { status: 200 });
+        // 替换保护单：先 DELETE algoOrder（成功），再 POST algoOrder（新单）
+        if (String(input).includes("/algoOrder") && init?.method === "DELETE") {
+          return new Response(JSON.stringify({ algoId: 88123, algoStatus: "CANCELLED" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ algoId: 999, algoStatus: "NEW" }), { status: 200 });
       },
     });
 
@@ -318,8 +325,8 @@ describe("BinanceProductionExecutionAdapter", () => {
       stopPrice: 100.1,
     });
 
-    const deletes = requests.filter((request) => request.init?.method === "DELETE" && request.url.includes("/fapi/v1/order") && request.url.includes("orderId=88123"));
+    const deletes = requests.filter((request) => request.init?.method === "DELETE" && request.url.includes("/fapi/v1/algoOrder") && request.url.includes("algoId=88123"));
     expect(deletes).toHaveLength(1);
-    expect(requests.filter((request) => request.url.includes("/fapi/v1/order") && request.url.includes("type=STOP_MARKET"))).toHaveLength(1);
+    expect(requests.filter((request) => request.url.includes("/fapi/v1/algoOrder") && request.url.includes("type=STOP_MARKET"))).toHaveLength(1);
   });
 });

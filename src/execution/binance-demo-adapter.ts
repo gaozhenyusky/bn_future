@@ -14,6 +14,12 @@ type BinanceOrderPayload = {
   avgPrice?: string;
   price?: string;
   status?: string;
+  // Algo Order API（条件单）响应字段：币安要求 STOP_MARKET 等条件单走
+  // POST /fapi/v1/algoOrder（-4120），响应使用 algoId/algoStatus/clientAlgoId。
+  algoId?: number | string;
+  clientAlgoId?: string;
+  algoStatus?: string;
+  quantity?: string;
 };
 
 export class BinanceDemoExecutionError extends Error {
@@ -198,6 +204,11 @@ export class BinanceDemoExecutionAdapter implements ExecutionAdapter {
     });
   }
 
+  /** Demo 保护单为本地登记（无交易所挂单），无需撤销；no-op。 */
+  async cancelProtectionOrder(_input: { symbol: string; orderId: string }): Promise<void> {
+    return;
+  }
+
   async placeProtectionOrder(input: {
     symbol: string;
     clientOrderId: string;
@@ -250,8 +261,11 @@ export class BinanceDemoExecutionAdapter implements ExecutionAdapter {
   /** 从公开 exchangeInfo 读取 LOT_SIZE（失败时回退宽松默认，不阻断下单） */
   private async loadLotSize(symbol: string): Promise<{ step: number; minQty: number; maxQty: number }> {
     try {
-      const body = await this.request<{ symbols?: Array<{ symbol: string; filters?: Array<{ filterType?: string; stepSize?: string; minQty?: string; maxQty?: string }> }> }>("GET", "/fapi/v1/exchangeInfo", { symbol });
-      const lotSize = body.symbols?.[0]?.filters?.find((filter) => filter.filterType === "LOT_SIZE");
+      // 注意：UM 期货 /fapi/v1/exchangeInfo 的 symbol 参数会被忽略（返回全部合约），
+      // 必须按 symbol 字段从返回列表里精确匹配，否则会取到列表第一个（BTCUSDT）的 LOT_SIZE。
+      const body = await this.request<{ symbols?: Array<{ symbol: string; filters?: Array<{ filterType?: string; stepSize?: string; minQty?: string; maxQty?: string }> }> }>("GET", "/fapi/v1/exchangeInfo", {});
+      const symbolInfo = body.symbols?.find((item) => item.symbol === symbol);
+      const lotSize = symbolInfo?.filters?.find((filter) => filter.filterType === "LOT_SIZE");
       const step = Number(lotSize?.stepSize);
       const minQty = Number(lotSize?.minQty);
       const maxQty = Number(lotSize?.maxQty);
@@ -406,31 +420,51 @@ export class BinanceProductionExecutionAdapter extends BinanceDemoExecutionAdapt
     stopPrice: number;
   }): Promise<ExecutionOrder> {
     const quantity = await this.adjustQuantity(input.symbol, input.quantity);
-    const payload = await this.request<BinanceOrderPayload>("POST", "/fapi/v1/order", {
+    // 币安自 2025-12 起要求条件单（STOP_MARKET 等）走 Algo Order API：
+    // POST /fapi/v1/algoOrder，参数用 triggerPrice（代替 stopPrice），返回 algoId/algoStatus。
+    const payload = await this.request<BinanceOrderPayload>("POST", "/fapi/v1/algoOrder", {
+      algoType: "CONDITIONAL",
       symbol: input.symbol,
       side: "SELL",
       positionSide: "BOTH",
       type: "STOP_MARKET",
-      stopPrice: input.stopPrice,
+      triggerPrice: input.stopPrice,
       quantity,
       reduceOnly: "true",
-      newClientOrderId: input.clientOrderId,
-      newOrderRespType: "RESULT",
     });
-    const order = mapOrder(payload, {
-      symbol: input.symbol,
-      clientOrderId: input.clientOrderId,
-      quantity,
-      price: input.stopPrice,
-      side: "SELL",
-      reduceOnly: true,
-      type: "PROTECTION",
-    });
+    const order = mapOrder(
+      {
+        orderId: payload.algoId,
+        clientOrderId: payload.clientAlgoId ?? input.clientOrderId,
+        symbol: payload.symbol,
+        side: payload.side,
+        origQty: payload.quantity ?? String(quantity),
+        status: payload.algoStatus ?? payload.status,
+      },
+      {
+        symbol: input.symbol,
+        clientOrderId: input.clientOrderId,
+        quantity,
+        price: input.stopPrice,
+        side: "SELL",
+        reduceOnly: true,
+        type: "PROTECTION",
+      },
+    );
     // 保护单未挂上（NEW/REJECTED/未知）→ 抛错让引擎拒绝开仓并熔断。
     if (order.status !== "OPEN" && order.status !== "FILLED") {
       throw new BinanceDemoExecutionError(`Protection order not accepted (${order.status}) for ${input.symbol}`, true);
     }
     return order;
+  }
+
+  override async cancelProtectionOrder(input: { symbol: string; orderId: string }): Promise<void> {
+    if (input.orderId.startsWith("local-protection:")) return;
+    // 条件单走 Algo Order API 撤销（algoId）。
+    await this.request("DELETE", "/fapi/v1/algoOrder", {
+      symbol: input.symbol,
+      algoId: input.orderId,
+    });
   }
 
   override async replaceProtectionOrder(input: {
@@ -442,9 +476,9 @@ export class BinanceProductionExecutionAdapter extends BinanceDemoExecutionAdapt
   }): Promise<ExecutionOrder> {
     if (!input.oldOrderId.startsWith("local-protection:")) {
       // 真实挂单：先撤销旧保护单再挂新保护单；撤销失败视为未知状态（熔断兜底）。
-      await this.request("DELETE", "/fapi/v1/order", {
+      await this.request("DELETE", "/fapi/v1/algoOrder", {
         symbol: input.symbol,
-        orderId: input.oldOrderId,
+        algoId: input.oldOrderId,
       });
     }
     return this.placeProtectionOrder(input);

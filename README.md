@@ -181,6 +181,14 @@ npm run frontend:build
 - 入场后下 8% 硬止损；上涨 8% 平 50%，剩余仓位保护价移动到入场价上方约 0.1%；5m 反转时平剩余仓位；没有固定最长持仓时间。
 - 订单状态未知、数据流中断或保护单缺失会触发执行熔断。前端没有开启生产交易的按钮。
 
+### 手动干预注意事项（实盘）
+
+- **引擎外的任何手动操作不会自动同步引擎状态**。直接通过交易所 API 平仓、撤销保护单等操作后，必须手工同步数据库，否则 dashboard 会显示错误的"持仓中"，引擎还可能对已不存在的仓位执行止盈/止损（reduce-only 被拒会触发熔断），或错误占用 `maxOpenPositions` 名额拒绝新开仓。
+- 手动平仓后需要同步的两处：
+  1. `execution_positions`：将该 symbol 的记录 `status` 置为 `CLOSED`；
+  2. `execution_audit_events`：补一条 `POSITION_CLOSED`（`reason_code='MANUAL_FLATTEN'`）审计记录，说明为引擎外手动平仓。
+- 手动撤销保护单（Algo 条件单）后，如对应持仓仍在，需由引擎在下次替换保护单时重新挂单；确认 `fapi/v1/openAlgoOrders` 无残留。
+
 ## Public endpoint scope
 
 - Binance：公开 USDⓈ-M 合约行情、交易所元数据、只读 WebSocket 行情。

@@ -46,7 +46,7 @@ function settingsProviderOf(overrides: Partial<ExecutionSettings>) {
 }
 
 describe("DemoExecutionRiskPolicy", () => {
-  it("只允许 simulation 与 demo testnet，默认禁止生产模式", async () => {
+  it("生产模式已由用户显式确认启用，不再默认拦截（其余风控仍生效）", async () => {
     const policy = new DemoExecutionRiskPolicy();
 
     const decision = await policy.evaluateEntry(
@@ -56,8 +56,9 @@ describe("DemoExecutionRiskPolicy", () => {
       }),
     );
 
-    expect(decision.allowed).toBe(false);
-    expect(decision.reasonCode).toBe("PRODUCTION_MODE_DISABLED");
+    // 模式锁已解除：在满足其余条件时应放行（此处其它条件由 createSignal 满足）。
+    expect(decision.allowed).toBe(true);
+    expect(decision.plan).toBeDefined();
   });
 
   it("全部硬门槛满足时才允许入场，并给出默认仓位计划", async () => {

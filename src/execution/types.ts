@@ -157,6 +157,8 @@ export interface ExecutionAdapter {
     quantity: number;
     stopPrice: number;
   }): Promise<ExecutionOrder>;
+  /** 撤销保护单（全平/清仓时调用，防止止损单残留）。 */
+  cancelProtectionOrder(input: { symbol: string; orderId: string }): Promise<void>;
 }
 
 export interface PositionPort {

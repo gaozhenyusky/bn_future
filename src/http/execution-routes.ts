@@ -27,6 +27,53 @@ function extractExits(events: AuditEvent[]): PnlExit[] {
     });
 }
 
+interface RoundInput {
+  entryPrice: number;
+  entryQuantity: number;
+  exits: PnlExit[];
+  openedAt: number;
+  closedAt: number | null;
+}
+
+/**
+ * 把审计事件逐轮配对：每一条 ENTRY_OPENED 与其后（直到下一条 ENTRY_OPENED 之前）的
+ * 部分止盈/平仓事件归为一轮。同一 symbol 反复开仓时，execution_positions 只保留最新
+ * 一条记录，若把所有平仓都挂在最新开仓价下计算，PnL 会严重失真。
+ * 事件按 occurred_at 升序传入。
+ */
+function groupRounds(events: AuditEvent[], fallbackEntryPrice: number, fallbackQuantity: number): RoundInput[] {
+  const rounds: RoundInput[] = [];
+  let current: RoundInput | null = null;
+
+  for (const event of events) {
+    if (event.type === "ENTRY_OPENED") {
+      if (current) rounds.push(current);
+      const qty = Number(event.details?.quantity);
+      const price = Number(event.details?.entryPrice);
+      current = {
+        entryPrice: Number.isFinite(price) && price > 0 ? price : fallbackEntryPrice,
+        entryQuantity: Number.isFinite(qty) && qty > 0 ? qty : fallbackQuantity,
+        exits: [],
+        openedAt: event.at,
+        closedAt: null,
+      };
+    } else if (current && (event.type === "POSITION_PARTIALLY_EXITED" || event.type === "POSITION_CLOSED")) {
+      const quantity = Number(event.details?.quantity);
+      const price = Number(event.details?.price);
+      if (Number.isFinite(quantity) && Number.isFinite(price) && quantity > 0 && price > 0) {
+        current.exits.push({ price, quantity });
+      }
+      if (event.type === "POSITION_CLOSED") {
+        current.closedAt = event.at;
+        rounds.push(current);
+        current = null;
+      }
+    }
+  }
+  if (current) rounds.push(current); // 仍未平仓的最后一轮
+  return rounds;
+}
+
 export interface ExecutionPnlDeps {
   executionRecords?: MysqlExecutionRecordRepository;
   /** 提供当前价格（浮动盈亏用）；失败时返回 undefined */
@@ -92,7 +139,6 @@ async function serializeRecordWithPnl(
 ): Promise<unknown> {
   const position = record.position;
   const closedAt = recordClosedAt;
-  const heldMs = (closedAt ?? now) - position.openedAt;
   const currentPrice =
     record.status === "OPEN" && deps.latestPriceProvider
       ? await deps.latestPriceProvider(record.symbol).catch(() => undefined)
@@ -102,15 +148,43 @@ async function serializeRecordWithPnl(
       ? await deps.fundingRateProvider(record.symbol).catch(() => DEFAULT_FUNDING_RATE)
       : DEFAULT_FUNDING_RATE;
 
-  const pnl = calculatePnlBreakdown({
-    entryPrice: position.entryPrice,
-    entryQuantity: position.initialQuantity,
-    exits: extractExits(recordEvents),
-    heldMs,
-    currentPrice,
-    remainingQuantity: record.status === "OPEN" ? position.remainingQuantity : 0,
-    fundingRate,
-  });
+  // 逐轮配对：同一 symbol 反复开仓时按事件逐轮计算盈亏再汇总，避免所有平仓
+  // 都挂在最新一轮开仓价下导致 PnL 失真。
+  const rounds = groupRounds(recordEvents, position.entryPrice, position.initialQuantity);
+  let realizedPnl = 0;
+  let unrealizedPnl = 0;
+  let commission = 0;
+  let fundingFee = 0;
+  let fundingPeriods = 0;
+
+  for (const round of rounds) {
+    const isOpen = round.closedAt === null;
+    const heldMs = (round.closedAt ?? now) - round.openedAt;
+    const breakdown = calculatePnlBreakdown({
+      entryPrice: round.entryPrice,
+      entryQuantity: round.entryQuantity,
+      exits: round.exits,
+      heldMs,
+      currentPrice: isOpen ? currentPrice : undefined,
+      remainingQuantity: isOpen ? position.remainingQuantity : 0,
+      fundingRate,
+    });
+    realizedPnl += breakdown.realizedPnl;
+    unrealizedPnl += breakdown.unrealizedPnl;
+    commission += breakdown.commission;
+    fundingFee += breakdown.fundingFee;
+    fundingPeriods += breakdown.fundingPeriods;
+  }
+
+  const pnl = {
+    realizedPnl,
+    unrealizedPnl,
+    totalPnl: realizedPnl + unrealizedPnl,
+    commission,
+    fundingFee,
+    netPnl: realizedPnl + unrealizedPnl - commission - fundingFee,
+    fundingPeriods,
+  };
 
   return {
     symbol: record.symbol,

@@ -23,10 +23,8 @@ export class DemoExecutionRiskPolicy {
   }
 
   async evaluateEntry(signal: ExecutionSignal, context: ExecutionRiskContext): Promise<EntryRiskDecision> {
-    if (context.mode !== "SIMULATION" && context.mode !== "BINANCE_DEMO_TESTNET") {
-      return { allowed: false, reasonCode: "PRODUCTION_MODE_DISABLED" };
-    }
-
+    // 实盘模式（BINANCE_PRODUCTION）已由用户显式确认启用，不再在此拦截；
+    // 其余风控（OI 结构、成交量、持仓数、止损等）在下方继续生效。
     if (context.circuitBreakerActive) {
       return { allowed: false, reasonCode: "CIRCUIT_BREAKER_ACTIVE" };
     }

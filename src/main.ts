@@ -116,6 +116,10 @@ class SimulationExecutionAdapter implements ExecutionAdapter {
   async replaceProtectionOrder(input: { symbol: string; oldOrderId: string; clientOrderId: string; quantity: number; stopPrice: number }): Promise<ExecutionOrder> {
     return this.placeProtectionOrder(input);
   }
+
+  async cancelProtectionOrder(_input: { symbol: string; orderId: string }): Promise<void> {
+    return;
+  }
 }
 
 function isExecutedDirectly(): boolean {
